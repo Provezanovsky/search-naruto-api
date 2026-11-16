@@ -1,6 +1,6 @@
 # SearchNarutoAPI · Arquivo Shinobi
 
-Atividade da Lista 26 de Desenvolvimento Web. Aplicação **Blazor WebAssembly** em **.NET 10**, escrita em C# e executada no navegador.
+Aplicação **Blazor WebAssembly** em **.NET 10**, escrita em C# e executada no navegador.
 
 - Lista os personagens da Dattebayo API com paginação e busca por nome.
 - Exibe nome, imagem, clã, afiliação, patente ninja e jutsus. Campos ausentes são identificados na interface.
