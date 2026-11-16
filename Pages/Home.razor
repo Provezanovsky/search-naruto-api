@@ -1,0 +1,285 @@
+@page "/"
+@implements IDisposable
+@inject DattebayoClient Api
+
+<PageTitle>Arquivo Shinobi | SearchNarutoAPI</PageTitle>
+
+<section class="hero" aria-labelledby="page-heading">
+    <div class="hero-art" aria-hidden="true">忍</div>
+    <div class="hero-content">
+        <span class="eyebrow"><span aria-hidden="true"></span> GUIA DE PERSONAGENS</span>
+        <h1 id="page-heading">Arquivo <em>Shinobi</em></h1>
+        <p>Explore o universo de Naruto e consulte o clã, a patente e os jutsus de cada personagem.</p>
+        <form class="search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
+            <label for="name-search" class="sr-only">Nome do personagem</label>
+            <input id="name-search" type="search" placeholder="Ex.: Naruto, Sasuke ou Sakura"
+                   @bind="searchInput" @bind:event="oninput" />
+            <button type="submit" class="primary" disabled="@loading">Buscar</button>
+        </form>
+    </div>
+</section>
+
+<section class="catalog" aria-labelledby="catalog-heading">
+    <div class="section-title">
+        <div>
+            <span class="eyebrow">CATÁLOGO</span>
+            <h2 id="catalog-heading">Personagens</h2>
+        </div>
+        @if (!string.IsNullOrEmpty(query))
+        {
+            <button type="button" class="secondary" disabled="@loading" @onclick="ClearAsync">Limpar busca</button>
+        }
+    </div>
+    <div aria-live="polite" aria-atomic="true">
+        @if (loading)
+        {
+            <p class="state" role="status">Consultando a Dattebayo API…</p>
+        }
+        else if (error is not null)
+        {
+            <div class="state">
+                <p role="alert">@error</p>
+                <button type="button" class="secondary" @onclick="RetryAsync">Tentar novamente</button>
+            </div>
+        }
+        else if (result is null || result.Characters.Length == 0)
+        {
+            <p class="state">Nenhum personagem encontrado para “@query”. Tente outro nome.</p>
+        }
+        else
+        {
+            <p class="summary">
+                @result.Total @(result.Total == 1 ? "personagem" : "personagens")
+                @if (!string.IsNullOrEmpty(query))
+                {
+                    <span> · Busca por “@query”</span>
+                }
+            </p>
+        }
+    </div>
+    @if (!loading && error is null && result is { Characters.Length: > 0 } page)
+    {
+        <div class="cards">
+            @foreach (var character in page.Characters)
+            {
+                <article class="card" @key="character.Id">
+                    <div class="portrait">
+                        <Portrait Character="@character" />
+                        <span class="serial">#@character.Id</span>
+                    </div>
+                    <div class="card-content">
+                        <h3>@character.Name</h3>
+                        <CharacterFacts Character="@character" />
+                        <div class="jutsu-preview">
+                            <h4>Jutsus <span>@(character.Jutsu?.Length ?? 0)</span></h4>
+                            @if (character.Jutsu is { Length: > 0 } jutsus)
+                            {
+                                <ul>
+                                    @foreach (var jutsu in jutsus.Take(3))
+                                    {
+                                        <li>@jutsu</li>
+                                    }
+                                </ul>
+                            }
+                            else
+                            {
+                                <p>Nenhum jutsu informado.</p>
+                            }
+                        </div>
+                        <button type="button" class="details-link" @onclick="() => OpenDetailsAsync(character)">
+                            Ver ficha completa <span aria-hidden="true">↗</span>
+                        </button>
+                    </div>
+                </article>
+            }
+        </div>
+        @if (TotalPages > 1)
+        {
+            <nav class="pagination" aria-label="Páginas de personagens">
+                <button type="button" class="secondary" disabled="@(page.CurrentPage <= 1)"
+                        @onclick="() => LoadAsync(page.CurrentPage - 1)">← Anterior</button>
+                <span>Página @(page.CurrentPage) de @TotalPages</span>
+                <button type="button" class="secondary" disabled="@(page.CurrentPage >= TotalPages)"
+                        @onclick="() => LoadAsync(page.CurrentPage + 1)">Próxima →</button>
+            </nav>
+        }
+    }
+</section>
+
+@if (selected is not null)
+{
+    <div class="detail-wrap">
+        <section class="detail" role="region" aria-labelledby="detail-heading">
+            <div class="section-title">
+                <div>
+                    <span class="eyebrow">FICHA DO PERSONAGEM</span>
+                    <h2 id="detail-heading" tabindex="-1" @ref="detailHeading">@selected.Name</h2>
+                </div>
+                <button type="button" class="secondary" @onclick="CloseDetails">Fechar ficha</button>
+            </div>
+            @if (detailLoading)
+            {
+                <p role="status">Carregando a ficha completa…</p>
+            }
+            else if (detailError)
+            {
+                <p role="status">A consulta por ID falhou. Os dados carregados no catálogo continuam disponíveis.</p>
+                <button type="button" class="secondary" @onclick="() => OpenDetailsAsync(selected)">Tentar novamente</button>
+            }
+            <div class="detail-grid">
+                <div class="portrait"><Portrait Character="@selected" /></div>
+                <CharacterFacts Character="@selected" />
+            </div>
+            <h3>Jutsus</h3>
+            @if (selected.Jutsu is { Length: > 0 } details)
+            {
+                <ul class="full-jutsu">
+                    @foreach (var jutsu in details)
+                    {
+                        <li>@jutsu</li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <p>Nenhum jutsu informado.</p>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private const int PageSize = 9;
+    private readonly CancellationTokenSource lifetime = new();
+    private CharacterPage? result;
+    private Character? selected;
+    private ElementReference detailHeading;
+    private CancellationTokenSource? detailRequest;
+    private string searchInput = "";
+    private string query = "";
+    private string? error;
+    private int requestedPage = 1;
+    private bool loading = true;
+    private bool detailLoading;
+    private bool detailError;
+    private bool focusDetail;
+
+    private int TotalPages => result is { PageSize: > 0 }
+        ? (int)Math.Ceiling((double)result.Total / result.PageSize)
+        : 1;
+
+    protected override Task OnInitializedAsync() => LoadAsync(1);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusDetail && selected is not null)
+        {
+            focusDetail = false;
+            await detailHeading.FocusAsync();
+        }
+    }
+
+    private Task RetryAsync() => LoadAsync(requestedPage);
+
+    private Task SearchAsync()
+    {
+        if (loading)
+        {
+            return Task.CompletedTask;
+        }
+
+        query = searchInput.Trim();
+        return LoadAsync(1);
+    }
+
+    private Task ClearAsync()
+    {
+        searchInput = "";
+        return SearchAsync();
+    }
+
+    private async Task LoadAsync(int page)
+    {
+        requestedPage = page;
+        CloseDetails();
+        error = null;
+        loading = true;
+
+        try
+        {
+            result = await Api.ListAsync(page, PageSize, query, lifetime.Token);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+            // O usuário saiu da página.
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException
+            or InvalidDataException or OperationCanceledException)
+        {
+            result = null;
+            error = "Não foi possível carregar os personagens. A API pode estar indisponível ou demorando para responder.";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task OpenDetailsAsync(Character character)
+    {
+        CloseDetails();
+        var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        detailRequest = request;
+        selected = character;
+        detailLoading = true;
+        focusDetail = true;
+
+        try
+        {
+            var item = await Api.GetAsync(character.Id, request.Token);
+            if (ReferenceEquals(detailRequest, request))
+            {
+                selected = item;
+            }
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested)
+        {
+            // A ficha foi fechada ou substituída.
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException
+            or InvalidDataException or OperationCanceledException)
+        {
+            if (ReferenceEquals(detailRequest, request))
+            {
+                detailError = true;
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(detailRequest, request))
+            {
+                detailRequest = null;
+                detailLoading = false;
+            }
+            request.Dispose();
+        }
+    }
+
+    private void CloseDetails()
+    {
+        var request = detailRequest;
+        detailRequest = null;
+        request?.Cancel();
+        selected = null;
+        detailError = false;
+        detailLoading = false;
+        focusDetail = false;
+    }
+
+    public void Dispose()
+    {
+        CloseDetails();
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

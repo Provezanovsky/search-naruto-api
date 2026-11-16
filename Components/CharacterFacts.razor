@@ -1,0 +1,21 @@
+<dl class="facts">
+    <div>
+        <dt>Clã</dt>
+        <dd>@Label(Character.Clans)</dd>
+    </div>
+    <div>
+        <dt>Afiliação</dt>
+        <dd>@Label(Character.Affiliations)</dd>
+    </div>
+    <div>
+        <dt>Patente ninja</dt>
+        <dd>@Label(Character.NinjaRanks)</dd>
+    </div>
+</dl>
+
+@code {
+    [Parameter, EditorRequired] public Character Character { get; set; } = default!;
+
+    private static string Label(IReadOnlyList<string> values) =>
+        values.Count == 0 ? "Não informado" : string.Join(" · ", values);
+}

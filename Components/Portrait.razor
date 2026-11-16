@@ -1,0 +1,37 @@
+@if (currentUrl is not null)
+{
+    <img @key="currentUrl" src="@currentUrl" alt="@Character.Name" loading="lazy"
+         referrerpolicy="no-referrer" @onerror="ShowNextImage" />
+}
+else
+{
+    <div class="portrait-placeholder" role="img" aria-label="Imagem indisponível para @Character.Name">
+        <span aria-hidden="true">忍</span>
+        <small>Imagem indisponível</small>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Character Character { get; set; } = default!;
+    private Character? previousCharacter;
+    private string[] urls = [];
+    private int imageIndex;
+    private string? currentUrl => imageIndex < urls.Length ? urls[imageIndex] : null;
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Character, previousCharacter))
+        {
+            return;
+        }
+
+        previousCharacter = Character;
+        urls = (Character.Images ?? [])
+            .Where(url => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+            .Distinct()
+            .ToArray();
+        imageIndex = 0;
+    }
+
+    private void ShowNextImage() => imageIndex++;
+}
